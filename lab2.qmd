@@ -1,0 +1,291 @@
+---
+title: "EDS 223 - Week 2"
+format: html
+editor: visual
+---
+
+```{r}
+install.packages("spData")
+```
+```{r}
+rm(list = ls()) # clears project history
+
+library(sf) # for handling vector data
+library(tmap) # for making maps
+library(tidyverse) # because we love the tidyverse
+library(spData) # preloaded spatial data
+```
+
+```{r}
+# create st_point with longitude and latitude for London
+# simple feature geometry
+london_point <- st_point(c(0.1, 51.5))
+
+# add coordinate reference system
+# simple feature collection; creates a list column and tells what reference point we are using
+london_geom <- st_sfc(london_point, crs = 4326)
+
+# create data frame of attributes about London
+london_attrib <- data.frame(
+  name = "London",
+  temperature = 25,
+  date = as.Date("2017-06-21")
+  )
+
+```
+
+```{r}
+# combine geometry and data frame
+# simple feature object
+london_sf <- st_sf(london_attrib, geometry = london_geom)
+
+# check class
+class(london_sf)
+```
+```{r}
+# check coordinate reference system
+st_crs(london_sf)
+
+```
+
+
+```{r}
+st_crs(london_sf)$IsGeographic
+
+```
+
+```{r}
+world <- spData::world # World country polygons
+class(world)
+
+dim(world)
+```
+```{r}
+names(world)
+```
+
+```{r}
+summary(world$lifeExp)
+```
+
+```{r}
+world_df <- world %>%
+  select(-geom) #doesn't actually remove the geom column
+
+colnames(world_df) # geom still shows up as a column
+
+world_df <- world %>%
+  select(continent)
+```
+
+```{r}
+#drops the geom column and turns the sf object into a dataframe
+
+world_df <- st_drop_geometry(world)
+class(world_df)
+```
+
+```{r}
+#coordinates represented in meters
+
+london_proj <- data.frame(x=53000, y=180000) %>% 
+  st_as_sf(coords = c("x", "y"), crs = "EPSG:27700")
+```
+
+
+```{r}
+# retrieves coordinate reference system
+st_crs(london_proj)
+
+# checks whether or not they are equal
+st_crs(london_proj) == st_crs(london_sf)
+```
+
+```{r}
+# transform from one CRS to another
+# use the object that you want to match it to
+london_sf_transform <- st_transform(london_sf, crs = st_crs(london_proj))
+
+
+```
+
+```{r}
+#Check whether the two objects match in CRS
+
+if(st_crs(london_sf_transform) == st_crs(london_proj)){
+  print("it's a match!")
+} else {
+  print("still not a match")
+}
+
+# or warning("warning not a match"), etc. 
+# warming message is descriptive so you can keep track of what you are asking of the code
+
+```
+
+
+```{r}
+# Equal Earth projection
+tm_shape(world, projection = 8857) +
+  tm_fill(col = "area_km2")
+
+```
+
+
+
+```{r}
+#Mercator projection
+tm_shape(world, projection = 3395) +
+  tm_fill(col = "area_km2")
+
+
+```
+
+## Vector Attribute subsetting
+
+```{r}
+# select columns
+world %>%
+  select(name_long, pop)
+```
+
+```{r}
+#remove columns
+world %>%
+  select(-subregion, -area_km2)
+```
+
+```{r}
+# select and rename columns
+world %>%
+  select(name = name_long, population = pop)
+```
+
+```{r}
+# filter based on variables
+world1 <- world %>%
+  filter(area_km2 < 10000)
+
+summary(world1$area_km2)
+
+```
+
+```{r}
+world2 <- world %>%
+  filter(lifeExp >= 80)
+
+nrow(world2)
+```
+```{r}
+#chaining commands with piping
+
+world %>%
+  filter(continent == "Asia") %>%
+  select(name_long, continent, lifeExp) %>%
+  slice_max(lifeExp) %>%
+  st_drop_geometry()
+
+```
+
+```{r}
+#aggregate data
+world %>%
+  group_by(continent) %>%
+  summarize(population = sum(pop, na.rm = TRUE)) %>%
+  st_drop_geometry()
+```
+
+# Joins with vector attributes
+
+```{r}
+coffee_data <- spData::coffee_data
+head(coffee_data)
+
+nrow(coffee_data)
+nrow(world)
+```
+
+```{r}
+# left join coffee_data to the world dataset
+# based on shared variable "name_long"
+
+world_coffee <- left_join(world, coffee_data, by = "name_long")
+
+names(world_coffee)
+```
+
+```{r}
+#Map it!
+
+tm_shape(world_coffee) +
+  tm_fill(col = "coffee_production_2017",
+          title = "Coffee production (2017)")
+```
+
+```{r}
+# Inner join so missing data are excluded; only full exact matches are included
+world_coffee_inner <- inner_join(world, coffee_data, by = "name_long")
+```
+
+
+```{r}
+if (nrow(world_coffee_inner) != nrow(coffee_data)) {
+  warning("inner join does not match original data. potential data loss during join")
+}
+```
+```{r}
+#what are countries in the coffee data that did not make the inner join? perhaps are not included in the original data. Use setdiff().
+
+setdiff(coffee_data$name_long, world$name_long)
+```
+
+```{r}
+# Need to figure out how the work data set represent Congo to fix it.
+# search world data set for representation
+
+# search for the DRC in the world dataset
+drc <- stringr::str_subset(world$name_long, "Dem*.+Congo")
+
+```
+
+```{r}
+# update coffee data with new string information for DRC
+coffee_data$name_long[stringr::str_detect(coffee_data$name_long, "Congo")] <- drc
+```
+
+
+```{r}
+# run test again
+world_coffee_inner <- inner_join(world, coffee_data , by = "name_long")
+
+# update warning message conditional to include the mismatch for "others"
+if (nrow(world_coffee_inner) != nrow(coffee_data) & setdiff(coffee_data$name_long, world_coffee_inner$name_long) != "Others") {
+  warning("inner join does not match original data. potential data loss during join")
+}
+
+```
+
+```{r}
+#Make a new map with updated dataframe
+
+tm_shape(world_coffee_inner) +
+  tm_polygons(fill = "coffee_production_2017",
+              title = "Coffee production (2017)") +
+  tm_layout(legend.outside = TRUE)
+
+# These are the countries that have data
+# Plots the intermediate results of the inner join
+```
+
+
+
+```{r}
+# Flip the inner join and see what happens.
+
+coffee_world <- left_join(coffee_data, world, by = "name_long")
+class(coffee_world)
+```
+```{r}
+names(coffee_world)
+```
+
